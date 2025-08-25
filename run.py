@@ -1,6 +1,7 @@
 import os
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
+
 import sys
 from typing import Union, OrderedDict
 from dotenv import load_dotenv
@@ -68,7 +69,7 @@ def main():
         default=None,
         help='Name to replace [name] tag in config file, useful for shared config file'
     )
-    
+
     parser.add_argument(
         '-l', '--log',
         type=str,
@@ -76,7 +77,7 @@ def main():
         help='Log file to write output to'
     )
     args = parser.parse_args()
-    
+
     if args.log is not None:
         setup_log_to_file(args.log)
 

@@ -30,7 +30,8 @@ from transformers import (
 )
 from toolkit.models.size_agnostic_feature_encoder import SAFEImageProcessor, SAFEVisionModel
 
-from transformers import ViTHybridImageProcessor, ViTHybridForImageClassification
+from transformers.models.deprecated.vit_hybrid.image_processing_vit_hybrid import ViTHybridImageProcessor
+from transformers import  ViTHybridForImageClassification
 
 from transformers import ViTFeatureExtractor, ViTForImageClassification
 
