@@ -1,8 +1,64 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import useSampleImages from '@/hooks/useSampleImages';
 import SampleImageCard from './SampleImageCard';
 import { Job } from '@prisma/client';
 import { JobConfig } from '@/types';
+import { LuImageOff, LuLoader, LuBan } from 'react-icons/lu';
+import { Button } from '@headlessui/react';
+import { FaDownload } from 'react-icons/fa';
+import { apiClient } from '@/utils/api';
+import classNames from 'classnames';
+
+interface SampleImagesMenuProps {
+  job?: Job | null;
+}
+
+export const SampleImagesMenu = ({ job }: SampleImagesMenuProps) => {
+  const [isZipping, setIsZipping] = useState(false);
+
+  const downloadZip = async () => {
+    if (isZipping) return;
+    setIsZipping(true);
+
+    try {
+      const res = await apiClient.post('/api/zip', {
+        zipTarget: 'samples',
+        jobName: job?.name,
+      });
+
+      const zipPath = res.data.zipPath; // e.g. /mnt/Train2/out/ui/.../samples.zip
+      if (!zipPath) throw new Error('No zipPath in response');
+
+      const downloadPath = `/api/files/${encodeURIComponent(zipPath)}`;
+      const a = document.createElement('a');
+      a.href = downloadPath;
+      // optional: suggest filename (browser may ignore if server sets Content-Disposition)
+      a.download = 'samples.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      console.error('Error downloading zip:', err);
+    } finally {
+      setIsZipping(false);
+    }
+  };
+  return (
+    <Button
+      onClick={downloadZip}
+      className={classNames(`px-4 py-1 h-8 hover:bg-gray-200 dark:hover:bg-gray-700`, {
+        'opacity-50 cursor-not-allowed': isZipping,
+      })}
+    >
+      {isZipping ? (
+        <LuLoader className="animate-spin inline-block mr-2" />
+      ) : (
+        <FaDownload className="inline-block mr-2" />
+      )}
+      {isZipping ? 'Preparing' : 'Download'}
+    </Button>
+  );
+};
 
 interface SampleImagesProps {
   job: Job;
@@ -22,6 +78,58 @@ export default function SampleImages({ job }: SampleImagesProps) {
     }
     return 10;
   }, [job]);
+
+  const PageInfoContent = useMemo(() => {
+    let icon = null;
+    let text = '';
+    let subtitle = '';
+    let showIt = false;
+    let bgColor = '';
+    let textColor = '';
+    let iconColor = '';
+
+    if (sampleImages.length > 0) return null;
+
+    if (status == 'loading') {
+      icon = <LuLoader className="animate-spin w-8 h-8" />;
+      text = 'Loading Samples';
+      subtitle = 'Please wait while we fetch your samples...';
+      showIt = true;
+      bgColor = 'bg-gray-50 dark:bg-gray-800/50';
+      textColor = 'text-gray-900 dark:text-gray-100';
+      iconColor = 'text-gray-500 dark:text-gray-400';
+    }
+    if (status == 'error') {
+      icon = <LuBan className="w-8 h-8" />;
+      text = 'Error Loading Samples';
+      subtitle = 'There was a problem fetching the samples.';
+      showIt = true;
+      bgColor = 'bg-red-50 dark:bg-red-950/20';
+      textColor = 'text-red-900 dark:text-red-100';
+      iconColor = 'text-red-600 dark:text-red-400';
+    }
+    if (status == 'success' && sampleImages.length === 0) {
+      icon = <LuImageOff className="w-8 h-8" />;
+      text = 'No Samples Found';
+      subtitle = 'No samples have been generated yet';
+      showIt = true;
+      bgColor = 'bg-gray-50 dark:bg-gray-800/50';
+      textColor = 'text-gray-900 dark:text-gray-100';
+      iconColor = 'text-gray-500 dark:text-gray-400';
+    }
+
+    if (!showIt) return null;
+
+    return (
+      <div
+        className={`mt-10 flex flex-col items-center justify-center py-16 px-8 rounded-xl border-2 border-gray-700 border-dashed ${bgColor} ${textColor} mx-auto max-w-md text-center`}
+      >
+        <div className={`${iconColor} mb-4`}>{icon}</div>
+        <h3 className="text-lg font-semibold mb-2">{text}</h3>
+        <p className="text-sm opacity-75 leading-relaxed">{subtitle}</p>
+      </div>
+    );
+  }, [status, sampleImages.length]);
 
   // Use direct Tailwind class without string interpolation
   // This way Tailwind can properly generate the class
@@ -118,8 +226,7 @@ export default function SampleImages({ job }: SampleImagesProps) {
   return (
     <div>
       <div className="pb-4">
-        {status === 'loading' && sampleImages.length === 0 && <p>Loading...</p>}
-        {status === 'error' && <p>Error fetching sample images</p>}
+        {PageInfoContent}
         {sampleImages && (
           <div className={`grid ${gridColsClass} gap-1`}>
             {sampleImages.map((sample: string) => (
