@@ -65,11 +65,13 @@ config:
 
       model:
         # huggingface model name or path, this one if bf16, vs the float32 of the official repo
-        name_or_path: "ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16"
+        #name_or_path: "ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16"
+        name_or_path: "/app/RH_Trainer/train_data/models/Wan/Wan/Wan2.2-T2V-A14B-Diffusers-bf16"
         arch: 'wan22_14b'
         quantize: true
         # This will pull and use a custom Accuracy Recovery Adapter to train at 4bit
-        qtype: "uint4|ostris/accuracy_recovery_adapters/wan22_14b_t2i_torchao_uint4.safetensors"
+        #qtype: "uint4|ostris/accuracy_recovery_adapters/wan22_14b_t2i_torchao_uint4.safetensors"
+        qtype: "uint4|/app/RH_Trainer/train_data/models/Wan/Wan2.2-T2V-A14B-Diffusers-bf16/wan22_14b_t2i_torchao_uint4.safetensors"
         quantize_te: true
         qtype_te: "qfloat8"
         low_vram: true
@@ -100,7 +102,7 @@ config:
           - "photo of a man, white background, medium shot, modeling clothing, studio lighting, white backdrop"
           - "a man holding a sign that says, 'this is a sign'"
           - "a bulldog, in a post apocalyptic world, with a shotgun, in a leather jacket, in a desert, with a motorcycle"
-        neg: ""  
+        neg: ""
         seed: 42
         walk_seed: true
         guidance_scale: 3.5

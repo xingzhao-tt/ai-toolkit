@@ -205,7 +205,7 @@ class Wan2214bModel(Wan21):
             raise ValueError(
                 "At least one of train_high_noise or train_low_noise must be True in model.model_kwargs"
             )
-        
+
         # if we are only training one or the other, the target LoRA modules will be the wan transformer class
         if not self.train_high_noise or not self.train_low_noise:
             self.target_lora_modules = ["WanTransformer3DModel"]
@@ -338,13 +338,13 @@ class Wan2214bModel(Wan21):
             boundary_ratio=boundary_ratio_t2v,
             low_vram=self.model_config.low_vram,
         )
-        
+
         if self.model_config.quantize and self.model_config.accuracy_recovery_adapter is not None:
             # apply the accuracy recovery adapter to both transformers
             self.print_and_status_update("Applying Accuracy Recovery Adapter to Transformers")
             quantize_model(self, transformer)
             flush()
-            
+
         return transformer
 
     def get_generation_pipeline(self):
@@ -446,7 +446,7 @@ class Wan2214bModel(Wan21):
         # we need to build out both dictionaries for high and low noise LoRAs
         high_noise_lora = {}
         low_noise_lora = {}
-        
+
         only_train_high_noise = self.train_high_noise and not self.train_low_noise
         only_train_low_noise = self.train_low_noise and not self.train_high_noise
 
@@ -467,6 +467,9 @@ class Wan2214bModel(Wan21):
                 ".safetensors", "_high_noise.safetensors"
             )
             save_file(high_noise_lora, high_noise_lora_path, metadata=metadata)
+            # 添加正确的日志输出
+            from toolkit.print import print_acc
+            print_acc(f"Saved checkpoint to {high_noise_lora_path}")
 
         if len(low_noise_lora.keys()) > 0:
             # save the low noise LoRA
@@ -474,6 +477,9 @@ class Wan2214bModel(Wan21):
                 ".safetensors", "_low_noise.safetensors"
             )
             save_file(low_noise_lora, low_noise_lora_path, metadata=metadata)
+            # 添加正确的日志输出
+            from toolkit.print import print_acc
+            print_acc(f"Saved checkpoint to {low_noise_lora_path}")
 
     def load_lora(self, file: str):
         # if it doesnt have high_noise or low_noise, it is a combo LoRA
@@ -511,7 +517,7 @@ class Wan2214bModel(Wan21):
                     "diffusion_model.", "diffusion_model.transformer_2."
                 )
                 combined_dict[new_key] = low_noise_lora[key]
-        
+
         # if we are not training both stages, we wont have transformer designations in the keys
         if not self.train_high_noise or not self.train_low_noise:
             new_dict = {}
@@ -526,7 +532,7 @@ class Wan2214bModel(Wan21):
             combined_dict = new_dict
 
         return combined_dict
-    
+
     def generate_single_image(
         self,
         pipeline,
