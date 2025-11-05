@@ -29,16 +29,20 @@ def print_acc(*args, **kwargs):
                     # 在消息前添加文件名和行号
                     if args:
                         first_arg = f"[{filename}:{line_number}] {args[0]}"
-                        print(first_arg, *args[1:], **kwargs)
+                        print(first_arg, *args[1:], flush=True, **kwargs)
                     else:
-                        print(f"[{filename}:{line_number}]", **kwargs)
+                        print(f"[{filename}:{line_number}]", flush=True, **kwargs)
                 else:
-                    print(*args, **kwargs)
+                    print(*args, flush=True, **kwargs)
             finally:
                 del frame
         else:
             # 正常输出，不添加调试信息
-            print(*args, **kwargs)
+            print(*args, flush=True, **kwargs)
+
+        # 同时刷新 stderr，确保 tqdm 输出与 print 输出同步
+        sys.stderr.flush()
+
 
 
 class Logger:
