@@ -659,8 +659,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 json.dump(json_data, f, indent=4)
 
         # 检查是否是 WAN 2.2 14B 模型，如果是则不打印日志（因为 save_lora 已经打印了正确的路径）
-        is_wan22_14b = (hasattr(self.sd, 'arch') and self.sd.arch == 'wan22_14b') or \
-                       (hasattr(self.sd, 'model_config') and hasattr(self.sd.model_config, 'arch') and self.sd.model_config.arch == 'wan22_14b')
+        is_wan22_14b = (hasattr(self.sd, 'arch') and 'wan22_14b' in self.sd.arch) or \
+                       (hasattr(self.sd, 'model_config') and hasattr(self.sd.model_config, 'arch') and 'wan22_14b' in self.sd.model_config.arch)
 
         if not is_wan22_14b or self.snr_gos:  # 如果不是 WAN 2.2 14B 或者有 SNR 配置，则打印日志
             print_acc(f"Saved checkpoint to {file_path}")
