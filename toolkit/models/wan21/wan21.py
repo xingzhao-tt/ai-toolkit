@@ -6,10 +6,11 @@ from toolkit.accelerator import unwrap_model
 from toolkit.basic import flush
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.dequantize import patch_dequantization_on_save
+from toolkit.memory_management.manager import MemoryManager
 from toolkit.models.base_model import BaseModel
 from toolkit.prompt_utils import PromptEmbeds
 from transformers import AutoTokenizer, UMT5EncoderModel
-from diffusers import  WanPipeline, WanTransformer3DModel, AutoencoderKL
+from diffusers import WanPipeline, WanTransformer3DModel, AutoencoderKL
 from .autoencoder_kl_wan import AutoencoderKLWan
 import os
 import sys
@@ -33,15 +34,21 @@ from toolkit.util.quantize import quantize, get_qtype
 from diffusers import FlowMatchEulerDiscreteScheduler, UniPCMultistepScheduler
 from typing import TYPE_CHECKING, List
 from toolkit.accelerator import unwrap_model
-from toolkit.samplers.custom_flowmatch_sampler import CustomFlowMatchEulerDiscreteScheduler
+from toolkit.samplers.custom_flowmatch_sampler import (
+    CustomFlowMatchEulerDiscreteScheduler,
+)
 from tqdm import tqdm
 import torch.nn.functional as F
 from diffusers.pipelines.wan.pipeline_output import WanPipelineOutput
 from diffusers.pipelines.wan.pipeline_wan import XLA_AVAILABLE
+
 # from ...callbacks import MultiPipelineCallbacks, PipelineCallback
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 from typing import Any, Callable, Dict, List, Optional, Union
-from toolkit.models.wan21.wan_lora_convert import convert_to_diffusers, convert_to_original
+from toolkit.models.wan21.wan_lora_convert import (
+    convert_to_diffusers,
+    convert_to_original,
+)
 from toolkit.util.quantize import quantize_model
 from toolkit.models.loaders.umt5 import get_umt5_encoder
 
@@ -72,14 +79,14 @@ scheduler_configUniPC = {
     "use_beta_sigmas": False,
     "use_exponential_sigmas": False,
     "use_flow_sigmas": True,
-    "use_karras_sigmas": False
+    "use_karras_sigmas": False,
 }
 
 # for training. I think it is right
 scheduler_config = {
     "num_train_timesteps": 1000,
     "shift": 3.0,
-    "use_dynamic_shifting": False
+    "use_dynamic_shifting": False,
 }
 
 
@@ -107,6 +114,7 @@ class AggressiveWanUnloadPipeline(WanPipeline):
             scheduler=scheduler,
         )
         self._exec_device = device
+
     @property
     def _execution_device(self):
         return self._exec_device
@@ -121,8 +129,7 @@ class AggressiveWanUnloadPipeline(WanPipeline):
         num_inference_steps: int = 50,
         guidance_scale: float = 5.0,
         num_videos_per_prompt: Optional[int] = 1,
-        generator: Optional[Union[torch.Generator,
-                                  List[torch.Generator]]] = None,
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         latents: Optional[torch.Tensor] = None,
         prompt_embeds: Optional[torch.Tensor] = None,
         negative_prompt_embeds: Optional[torch.Tensor] = None,
@@ -130,8 +137,11 @@ class AggressiveWanUnloadPipeline(WanPipeline):
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         callback_on_step_end: Optional[
-            Union[Callable[[int, int, Dict], None],
-                  PipelineCallback, MultiPipelineCallbacks]
+            Union[
+                Callable[[int, int, Dict], None],
+                PipelineCallback,
+                MultiPipelineCallbacks,
+            ]
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 512,
@@ -196,7 +206,8 @@ class AggressiveWanUnloadPipeline(WanPipeline):
         prompt_embeds = prompt_embeds.to(device, transformer_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
-                device, transformer_dtype)
+                device, transformer_dtype
+            )
 
         # 4. Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -217,8 +228,7 @@ class AggressiveWanUnloadPipeline(WanPipeline):
         )
 
         # 6. Denoising loop
-        num_warmup_steps = len(timesteps) - \
-            num_inference_steps * self.scheduler.order
+        num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -246,28 +256,31 @@ class AggressiveWanUnloadPipeline(WanPipeline):
                         attention_kwargs=attention_kwargs,
                         return_dict=False,
                     )[0]
-                    noise_pred = noise_uncond + guidance_scale * \
-                        (noise_pred - noise_uncond)
+                    noise_pred = noise_uncond + guidance_scale * (
+                        noise_pred - noise_uncond
+                    )
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(
-                    noise_pred, t, latents, return_dict=False)[0]
+                    noise_pred, t, latents, return_dict=False
+                )[0]
 
                 if callback_on_step_end is not None:
                     callback_kwargs = {}
                     for k in callback_on_step_end_tensor_inputs:
                         callback_kwargs[k] = locals()[k]
-                    callback_outputs = callback_on_step_end(
-                        self, i, t, callback_kwargs)
+                    callback_outputs = callback_on_step_end(self, i, t, callback_kwargs)
 
                     latents = callback_outputs.pop("latents", latents)
-                    prompt_embeds = callback_outputs.pop(
-                        "prompt_embeds", prompt_embeds)
+                    prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
                     negative_prompt_embeds = callback_outputs.pop(
-                        "negative_prompt_embeds", negative_prompt_embeds)
+                        "negative_prompt_embeds", negative_prompt_embeds
+                    )
 
                 # call the callback, if provided
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
@@ -287,13 +300,14 @@ class AggressiveWanUnloadPipeline(WanPipeline):
                 .view(1, self.vae.config.z_dim, 1, 1, 1)
                 .to(latents.device, latents.dtype)
             )
-            latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
-                latents.device, latents.dtype
-            )
+            latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(
+                1, self.vae.config.z_dim, 1, 1, 1
+            ).to(latents.device, latents.dtype)
             latents = latents / latents_std + latents_mean
             video = self.vae.decode(latents, return_dict=False)[0]
             video = self.video_processor.postprocess_video(
-                video, output_type=output_type)
+                video, output_type=output_type
+            )
         else:
             video = latents
 
@@ -307,26 +321,31 @@ class AggressiveWanUnloadPipeline(WanPipeline):
 
 
 class Wan21(BaseModel):
-    arch = 'wan21'
+    arch = "wan21"
     _wan_generation_scheduler_config = scheduler_configUniPC
     _wan_expand_timesteps = False
     _wan_vae_path = None
 
-    _comfy_te_file = ['text_encoders/umt5_xxl_fp16.safetensors', 'text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors']
+    _comfy_te_file = [
+        "text_encoders/umt5_xxl_fp16.safetensors",
+        "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    ]
+
     def __init__(
-            self,
-            device,
-            model_config: ModelConfig,
-            dtype='bf16',
-            custom_pipeline=None,
-            noise_scheduler=None,
-            **kwargs
+        self,
+        device,
+        model_config: ModelConfig,
+        dtype="bf16",
+        custom_pipeline=None,
+        noise_scheduler=None,
+        **kwargs,
     ):
-        super().__init__(device, model_config, dtype,
-                         custom_pipeline, noise_scheduler, **kwargs)
+        super().__init__(
+            device, model_config, dtype, custom_pipeline, noise_scheduler, **kwargs
+        )
         self.is_flow_matching = True
         self.is_transformer = True
-        self.target_lora_modules = ['WanTransformer3DModel']
+        self.target_lora_modules = ["WanTransformer3DModel"]
 
         # cache for holding noise
         self.effective_noise = None
@@ -351,20 +370,29 @@ class Wan21(BaseModel):
 
         if self.model_config.split_model_over_gpus:
             raise ValueError(
-                "Splitting model over gpus is not supported for Wan2.1 models")
+                "Splitting model over gpus is not supported for Wan2.1 models"
+            )
 
-        if not self.model_config.low_vram:
+        if self.model_config.low_vram:
             # quantize on the device
-            transformer.to(self.quantize_device, dtype=dtype)
+            transformer.to("cpu", dtype=dtype)
+            flush()
+        else:
+            transformer.to(self.device_torch, dtype=dtype)
             flush()
 
-        if self.model_config.assistant_lora_path is not None or self.model_config.inference_lora_path is not None:
+        if (
+            self.model_config.assistant_lora_path is not None
+            or self.model_config.inference_lora_path is not None
+        ):
             raise ValueError(
-                "Assistant LoRA is not supported for Wan2.1 models currently")
+                "Assistant LoRA is not supported for Wan2.1 models currently"
+            )
 
         if self.model_config.lora_path is not None:
             raise ValueError(
-                "Loading LoRA is not supported for Wan2.1 models currently")
+                "Loading LoRA is not supported for Wan2.1 models currently"
+            )
 
         flush()
 
@@ -373,9 +401,19 @@ class Wan21(BaseModel):
             quantize_model(self, transformer)
             flush()
 
+        if (
+            self.model_config.layer_offloading
+            and self.model_config.layer_offloading_transformer_percent > 0
+        ):
+            MemoryManager.attach(
+                transformer,
+                self.device_torch,
+                offload_percent=self.model_config.layer_offloading_transformer_percent,
+            )
+
         if self.model_config.low_vram:
             self.print_and_status_update("Moving transformer to CPU")
-            transformer.to('cpu')
+            transformer.to("cpu")
 
         return transformer
 
@@ -384,18 +422,18 @@ class Wan21(BaseModel):
         model_path = self.model_config.name_or_path
 
         self.print_and_status_update("Loading Wan model")
-        subfolder = 'transformer'
+        subfolder = "transformer"
         transformer_path = model_path
         if os.path.exists(transformer_path):
             subfolder = None
-            transformer_path = os.path.join(transformer_path, 'transformer')
+            transformer_path = os.path.join(transformer_path, "transformer")
 
         te_path = "ai-toolkit/umt5_xxl_encoder"
-        if os.path.exists(os.path.join(model_path, 'text_encoder')):
+        if os.path.exists(os.path.join(model_path, "text_encoder")):
             te_path = model_path
 
         vae_path = self.model_config.extras_name_or_path
-        if os.path.exists(os.path.join(model_path, 'vae')):
+        if os.path.exists(os.path.join(model_path, "vae")):
             vae_path = model_path
 
         transformer = self.load_wan_transformer(
@@ -412,7 +450,7 @@ class Wan21(BaseModel):
             tokenizer_subfolder="tokenizer",
             encoder_subfolder="text_encoder",
             torch_dtype=dtype,
-            comfy_files=self._comfy_te_file
+            comfy_files=self._comfy_te_file,
         )
 
         text_encoder.to(self.device_torch, dtype=dtype)
@@ -423,6 +461,16 @@ class Wan21(BaseModel):
             quantize(text_encoder, weights=get_qtype(self.model_config.qtype))
             freeze(text_encoder)
             flush()
+
+        if (
+            self.model_config.layer_offloading
+            and self.model_config.layer_offloading_text_encoder_percent > 0
+        ):
+            MemoryManager.attach(
+                text_encoder,
+                self.device_torch,
+                offload_percent=self.model_config.layer_offloading_text_encoder_percent,
+            )
 
         if self.model_config.low_vram:
             print("Moving transformer back to GPU")
@@ -436,10 +484,12 @@ class Wan21(BaseModel):
         if self._wan_vae_path is not None and os.path.exists(self._wan_vae_path):
             # load the vae from individual repo
             vae = AutoencoderKLWan.from_pretrained(
-                self._wan_vae_path, torch_dtype=dtype).to(dtype=dtype)
+                self._wan_vae_path, torch_dtype=dtype
+            ).to(dtype=dtype)
         else:
             vae = AutoencoderKLWan.from_pretrained(
-                vae_path, subfolder="vae", torch_dtype=dtype).to(dtype=dtype)
+                vae_path, subfolder="vae", torch_dtype=dtype
+            ).to(dtype=dtype)
         flush()
 
         self.print_and_status_update("Making pipe")
@@ -483,7 +533,7 @@ class Wan21(BaseModel):
                 tokenizer=self.tokenizer,
                 scheduler=scheduler,
                 expand_timesteps=self._wan_expand_timesteps,
-                device=self.device_torch
+                device=self.device_torch,
             )
         else:
             pipeline = WanPipeline(
@@ -515,9 +565,11 @@ class Wan21(BaseModel):
         # todo, figure out how to do video
         output = pipeline(
             prompt_embeds=conditional_embeds.text_embeds.to(
-                self.device_torch, dtype=self.torch_dtype),
+                self.device_torch, dtype=self.torch_dtype
+            ),
             negative_prompt_embeds=unconditional_embeds.text_embeds.to(
-                self.device_torch, dtype=self.torch_dtype),
+                self.device_torch, dtype=self.torch_dtype
+            ),
             height=gen_config.height,
             width=gen_config.width,
             num_inference_steps=gen_config.num_inference_steps,
@@ -527,7 +579,7 @@ class Wan21(BaseModel):
             generator=generator,
             return_dict=False,
             output_type="pil",
-            **extra
+            **extra,
         )[0]
 
         # shape = [1, frames, channels, height, width]
@@ -544,7 +596,7 @@ class Wan21(BaseModel):
         latent_model_input: torch.Tensor,
         timestep: torch.Tensor,  # 0 to 1000 scale
         text_embeddings: PromptEmbeds,
-        **kwargs
+        **kwargs,
     ):
         # vae_scale_factor_spatial = 8
         # vae_scale_factor_temporal = 4
@@ -562,7 +614,7 @@ class Wan21(BaseModel):
             timestep=timestep,
             encoder_hidden_states=text_embeddings.text_embeds,
             return_dict=False,
-            **kwargs
+            **kwargs,
         )[0]
         return noise_pred
 
@@ -579,18 +631,13 @@ class Wan21(BaseModel):
         return PromptEmbeds(prompt_embeds)
 
     @torch.no_grad()
-    def encode_images(
-            self,
-            image_list: List[torch.Tensor],
-            device=None,
-            dtype=None
-    ):
+    def encode_images(self, image_list: List[torch.Tensor], device=None, dtype=None):
         if device is None:
             device = self.vae_device_torch
         if dtype is None:
             dtype = self.vae_torch_dtype
 
-        if self.vae.device == 'cpu':
+        if self.vae.device == torch.device("cpu"):
             self.vae.to(device)
         self.vae.eval()
         self.vae.requires_grad_(False)
@@ -618,7 +665,9 @@ class Wan21(BaseModel):
             target_h = H // 8 * 8
             target_w = W // 8 * 8
             images = images.permute(0, 2, 1, 3, 4).reshape(B * T, C, H, W)
-            images = F.interpolate(images, size=(target_h, target_w), mode='bilinear', align_corners=False)
+            images = F.interpolate(
+                images, size=(target_h, target_w), mode="bilinear", align_corners=False
+            )
             images = images.view(B, T, C, target_h, target_w).permute(0, 2, 1, 3, 4)
 
         latents = self.vae.encode(images).latent_dist.sample()
@@ -628,9 +677,9 @@ class Wan21(BaseModel):
             .view(1, self.vae.config.z_dim, 1, 1, 1)
             .to(latents.device, latents.dtype)
         )
-        latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
-            latents.device, latents.dtype
-        )
+        latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(
+            1, self.vae.config.z_dim, 1, 1, 1
+        ).to(latents.device, latents.dtype)
         latents = (latents - latents_mean) * latents_std
 
         return latents.to(device, dtype=dtype)
@@ -639,23 +688,27 @@ class Wan21(BaseModel):
         return self.model.proj_out.weight.requires_grad
 
     def get_te_has_grad(self):
-        return self.text_encoder.encoder.block[0].layer[0].SelfAttention.q.weight.requires_grad
+        return (
+            self.text_encoder.encoder.block[0]
+            .layer[0]
+            .SelfAttention.q.weight.requires_grad
+        )
 
     def save_model(self, output_path, meta, save_dtype):
         # only save the unet
         transformer: Wan21 = unwrap_model(self.model)
         transformer.save_pretrained(
-            save_directory=os.path.join(output_path, 'transformer'),
+            save_directory=os.path.join(output_path, "transformer"),
             safe_serialization=True,
         )
 
-        meta_path = os.path.join(output_path, 'aitk_meta.yaml')
-        with open(meta_path, 'w') as f:
+        meta_path = os.path.join(output_path, "aitk_meta.yaml")
+        with open(meta_path, "w") as f:
             yaml.dump(meta, f)
 
     def get_loss_target(self, *args, **kwargs):
-        noise = kwargs.get('noise')
-        batch = kwargs.get('batch')
+        noise = kwargs.get("noise")
+        batch = kwargs.get("batch")
         if batch is None:
             raise ValueError("Batch is not provided")
         if noise is None:
@@ -672,4 +725,4 @@ class Wan21(BaseModel):
         return "wan_2.1"
 
     def get_transformer_block_names(self):
-        return ['blocks']
+        return ["blocks"]

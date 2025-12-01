@@ -1,14 +1,17 @@
-from .chroma import ChromaModel
+from .chroma import ChromaModel, ChromaRadianceModel
 from .hidream import HidreamModel, HidreamE1Model
 from .f_light import FLiteModel
 from .omnigen2 import OmniGen2Model
 from .flux_kontext import FluxKontextModel
 from .wan22 import Wan225bModel, Wan2214bModel, Wan2214bI2VModel
-from .qwen_image import QwenImageModel, QwenImageEditModel
+from .qwen_image import QwenImageModel, QwenImageEditModel, QwenImageEditPlusModel
+from .flux2 import Flux2Model
+from .z_image import ZImageModel
 
 AI_TOOLKIT_MODELS = [
     # put a list of models here
     ChromaModel,
+    ChromaRadianceModel,
     HidreamModel,
     HidreamE1Model,
     FLiteModel,
@@ -19,4 +22,7 @@ AI_TOOLKIT_MODELS = [
     Wan2214bModel,
     QwenImageModel,
     QwenImageEditModel,
+    QwenImageEditPlusModel,
+    Flux2Model,
+    ZImageModel,
 ]
